@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#090a0d" />
+    <title>nipe.co</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="artwork">
+      <svg id="signal" role="img" aria-label="Interactive living signal">
+        <defs>
+          <linearGradient id="signal-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#e2ff58" />
+            <stop offset="27%" stop-color="#43e1c2" />
+            <stop offset="53%" stop-color="#7770ff" />
+            <stop offset="76%" stop-color="#f07bbd" />
+            <stop offset="100%" stop-color="#ff7058" />
+          </linearGradient>
+          <filter id="soft-glow" x="-30%" y="-300%" width="160%" height="700%">
+            <feGaussianBlur stdDeviation="18" />
+          </filter>
+        </defs>
+
+        <path id="signal-glow" fill="none" stroke="url(#signal-gradient)" filter="url(#soft-glow)" />
+        <path id="signal-ribbon" fill="url(#signal-gradient)" />
+        <g id="strands"></g>
+        <g id="beacons"></g>
+      </svg>
+      <div class="grain" aria-hidden="true"></div>
+    </main>
+    <script src="script.js"></script>
+  </body>
+</html>
