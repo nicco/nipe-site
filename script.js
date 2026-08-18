@@ -38,10 +38,31 @@ function resize() {
 
 function pathThrough(list, close = false) {
   if (!list.length) return "";
+  if (list.length === 1) return `M ${list[0].x.toFixed(2)} ${list[0].y.toFixed(2)}`;
+
+  const pointAt = (index) => {
+    if (close) return list[(index + list.length) % list.length];
+    return list[Math.max(0, Math.min(list.length - 1, index))];
+  };
+
   let path = `M ${list[0].x.toFixed(2)} ${list[0].y.toFixed(2)}`;
-  for (let index = 1; index < list.length; index += 1) {
-    path += ` L ${list[index].x.toFixed(2)} ${list[index].y.toFixed(2)}`;
+  const segmentCount = close ? list.length : list.length - 1;
+
+  for (let index = 0; index < segmentCount; index += 1) {
+    const previous = pointAt(index - 1);
+    const current = pointAt(index);
+    const next = pointAt(index + 1);
+    const following = pointAt(index + 2);
+    const controlOneX = current.x + (next.x - previous.x) / 6;
+    const controlOneY = current.y + (next.y - previous.y) / 6;
+    const controlTwoX = next.x - (following.x - current.x) / 6;
+    const controlTwoY = next.y - (following.y - current.y) / 6;
+
+    path += ` C ${controlOneX.toFixed(2)} ${controlOneY.toFixed(2)},`;
+    path += ` ${controlTwoX.toFixed(2)} ${controlTwoY.toFixed(2)},`;
+    path += ` ${next.x.toFixed(2)} ${next.y.toFixed(2)}`;
   }
+
   return close ? `${path} Z` : path;
 }
 
@@ -123,8 +144,9 @@ function calculateGeometry(time) {
 
 function updateArtwork(time) {
   const centerPath = pathThrough(points);
+  const ribbonOutline = [...upper, ...lower.slice(1, -1).reverse()];
   glow.setAttribute("d", centerPath);
-  ribbon.setAttribute("d", pathThrough([...upper, ...lower.slice().reverse()], true));
+  ribbon.setAttribute("d", pathThrough(ribbonOutline, true));
 
   strands.forEach((strand, strandIndex) => {
     const position = strandIndex / (STRAND_COUNT - 1) * 2 - 1;

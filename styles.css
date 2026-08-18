@@ -55,6 +55,7 @@ body {
   opacity: 0.38;
   stroke-width: 34;
   stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 #signal-ribbon {
@@ -66,6 +67,7 @@ body {
   stroke: url(#signal-gradient);
   stroke-width: 0.85;
   stroke-linecap: round;
+  stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
 
