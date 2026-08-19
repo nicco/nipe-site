@@ -27,6 +27,14 @@
             <stop offset="90%" stop-color="#ffc4bb" stop-opacity="0.55" />
             <stop offset="100%" stop-color="#ffc4bb" stop-opacity="0" />
           </linearGradient>
+          <pattern id="signal-pixels" width="8" height="8" patternUnits="userSpaceOnUse">
+            <rect width="8" height="8" fill="transparent" />
+            <rect x="1" y="1" width="2" height="2" fill="#ffffff" opacity="0.48" />
+            <rect x="6" y="0" width="1" height="1" fill="#ffffff" opacity="0.28" />
+            <rect x="4" y="4" width="2" height="1" fill="#ffffff" opacity="0.34" />
+            <rect x="0" y="6" width="1" height="2" fill="#05060a" opacity="0.72" />
+            <rect x="6" y="6" width="2" height="2" fill="#05060a" opacity="0.5" />
+          </pattern>
           <filter id="soft-glow" x="-30%" y="-300%" width="160%" height="700%">
             <feGaussianBlur stdDeviation="18" />
           </filter>
@@ -34,10 +42,9 @@
 
         <path id="signal-glow" fill="url(#signal-gradient)" filter="url(#soft-glow)" />
         <path id="signal-ribbon" fill="url(#signal-gradient)" fill-rule="nonzero" />
-        <g id="flow-lines"></g>
-        <path id="signal-core" fill="none" stroke="url(#core-gradient)" />
-        <path id="motion-path" fill="none" stroke="transparent" />
-        <g id="beacons"></g>
+        <path id="signal-texture" fill="url(#signal-pixels)" fill-rule="nonzero" />
+        <g id="flow-lines" aria-hidden="true"></g>
+        <path id="morse-stream" fill="none" stroke="url(#core-gradient)" aria-hidden="true" />
       </svg>
       <div class="grain" aria-hidden="true"></div>
     </main>

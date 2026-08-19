@@ -1,11 +1,11 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
 const svg = document.querySelector("#signal");
 const ribbon = document.querySelector("#signal-ribbon");
+const texture = document.querySelector("#signal-texture");
 const glow = document.querySelector("#signal-glow");
-const core = document.querySelector("#signal-core");
-const motionPath = document.querySelector("#motion-path");
+const pixelPattern = document.querySelector("#signal-pixels");
 const flowLinesGroup = document.querySelector("#flow-lines");
-const beaconsGroup = document.querySelector("#beacons");
+const morseStream = document.querySelector("#morse-stream");
 const root = document.documentElement;
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -83,15 +83,22 @@ const FONT_RADII = [
 ];
 
 const SAMPLE_COUNT = 280;
-const BEACON_COUNT = 7;
 const FLOW_LINE_OFFSETS = [-0.72, -0.48, -0.24, 0.24, 0.48, 0.72];
 const ROUTE_ASPECT = 3.6965;
+const MORSE_UNIT = 2.2;
+const MORSE_MESSAGE = "Simplicity is the ultimate sophistication.";
+const MORSE_CODE = {
+  a: ".-", b: "-...", c: "-.-.", d: "-..", e: ".", f: "..-.", g: "--.",
+  h: "....", i: "..", j: ".---", k: "-.-", l: ".-..", m: "--", n: "-.",
+  o: "---", p: ".--.", q: "--.-", r: ".-.", s: "...", t: "-", u: "..-",
+  v: "...-", w: ".--", x: "-..-", y: "-.--", z: "--..", ",": "--..--",
+  ".": ".-.-.-",
+};
 const pulses = [];
 const guidePoints = [];
 const points = [];
 const upper = [];
 const lower = [];
-const beacons = [];
 const flowLines = [];
 
 let width = window.innerWidth;
@@ -114,6 +121,28 @@ function smoothStepRange(value, start, end) {
   return position * position * (3 - 2 * position);
 }
 
+function signalNoise(value) {
+  const noise = Math.sin(value * 12.9898 + 78.233) * 43758.5453;
+  return noise - Math.floor(noise);
+}
+
+function buildMorseDashArray(message) {
+  const characters = message.toLowerCase().split("");
+  const pattern = [];
+  characters.forEach((character, characterIndex) => {
+    const code = MORSE_CODE[character];
+    if (!code) return;
+    code.split("").forEach((symbol, symbolIndex) => {
+      const finalSymbol = symbolIndex === code.length - 1;
+      const nextCharacter = characters[characterIndex + 1];
+      const messageEnd = characterIndex === characters.length - 1;
+      const gap = finalSymbol ? (nextCharacter === " " || messageEnd ? 7 : 3) : 1;
+      pattern.push((symbol === "." ? 1 : 3) * MORSE_UNIT, gap * MORSE_UNIT);
+    });
+  });
+  return pattern.join(" ");
+}
+
 function mapFontPoint([x, y], index) {
   const compactViewport = width < 720;
   const naturalWidth = Math.min(
@@ -133,9 +162,12 @@ function mapFontPoint([x, y], index) {
   );
   const groupedX = tightenedX + 0.0305 - groupedSpacing;
   const iInward = Math.max(0, 1 - Math.abs(index - 43) / 8) * 0.026;
+  const pBowlEntry = smoothStepRange(index, 95, 101);
+  const pBowlExit = 1 - smoothStepRange(index, 127, 135);
+  const pBowlLift = Math.min(pBowlEntry, pBowlExit) * 0.058;
   return {
     x: (width - wordWidth) * 0.5 + (groupedX - iInward) * wordWidth,
-    y: (height - wordHeight) * 0.5 + y * wordHeight,
+    y: (height - wordHeight) * 0.5 + (y - pBowlLift) * wordHeight,
     radius: Math.max(0.0075, FONT_RADII[index]) * wordHeight * 1.16,
   };
 }
@@ -361,10 +393,6 @@ function curveThrough(list, moveTo = true) {
   return path;
 }
 
-function pathThrough(list) {
-  return curveThrough(list);
-}
-
 function polygonThrough(upperEdge, lowerEdge, centerline) {
   if (!upperEdge.length || !lowerEdge.length) return "";
   const reversedLower = lowerEdge.slice().reverse();
@@ -392,7 +420,7 @@ function createPulse(x, y) {
   pulses.push({
     u: closestIndex / Math.max(1, points.length - 1),
     age: 0,
-    strength: Math.max(7, Math.min(height * 0.024, 22)),
+    strength: Math.max(2.5, Math.min(height * 0.005, 5)),
   });
 
   const ring = document.createElement("i");
@@ -407,32 +435,25 @@ function calculateGeometry(time) {
   points.length = 0;
   upper.length = 0;
   lower.length = 0;
+  const interferenceFrame = Math.floor(time * 24);
+  const interferenceAmount = reducedMotion.matches ? 0 : 1;
+  const jitterX = (signalNoise(interferenceFrame) - 0.5) * 1.2 * interferenceAmount;
+  const jitterY = (signalNoise(interferenceFrame + 41) - 0.5) * 0.45 * interferenceAmount;
+  const syncFrame = Math.floor(time * 3.5);
+  const tearCenter = height * (0.36 + signalNoise(syncFrame + 113) * 0.28);
+  const tearBurst = signalNoise(syncFrame + 71) > 0.68 ? 1 : 0.28;
+  const tearShift = (signalNoise(interferenceFrame + 19) - 0.5)
+    * 5 * tearBurst * interferenceAmount;
   for (let index = 0; index < guidePoints.length; index += 1) {
     const guide = guidePoints[index];
-    const previous = guidePoints[Math.max(0, index - 1)];
-    const next = guidePoints[Math.min(guidePoints.length - 1, index + 1)];
-    const tangentX = next.x - previous.x;
-    const tangentY = next.y - previous.y;
-    const tangentLength = Math.hypot(tangentX, tangentY) || 1;
-    const normalX = -tangentY / tangentLength;
-    const normalY = tangentX / tangentLength;
     const edge = Math.pow(Math.sin(Math.PI * guide.u), 0.45);
     const ambientY = (
       Math.sin(guide.x / width * Math.PI * 7 + time * 0.52) * 2.2
       + Math.sin((guide.x + guide.y) / (width + height) * Math.PI * 17 - time * 0.31)
     ) * edge;
-    let normalOffset = 0;
-
-    for (const pulse of pulses) {
-      const distance = Math.abs(guide.u - pulse.u);
-      const waveFront = pulse.age * 0.2;
-      const shell = Math.exp(-Math.pow((distance - waveFront) * 44, 2));
-      normalOffset += Math.sin(distance * 105 - pulse.age * 19)
-        * shell * pulse.strength * Math.exp(-pulse.age * 1.3);
-    }
-
-    let x = guide.x + normalX * normalOffset;
-    let y = guide.y + ambientY + normalY * normalOffset;
+    const scanTear = Math.exp(-Math.pow((guide.y - tearCenter) / 5.5, 2));
+    let x = guide.x + jitterX + scanTear * tearShift;
+    let y = guide.y + ambientY + jitterY;
     if (pointerActive) {
       const distanceSquared = ((smoothPointerX - x) / width) ** 2
         + ((smoothPointerY - y) / height) ** 2;
@@ -452,8 +473,16 @@ function calculateGeometry(time) {
     const length = Math.hypot(dx, dy) || 1;
     points[index].normalX = -dy / length;
     points[index].normalY = dx / length;
+    let pulseThickness = 0;
+    for (const pulse of pulses) {
+      const distance = Math.abs(points[index].u - pulse.u);
+      const waveFront = pulse.age * 0.22;
+      const shell = Math.exp(-Math.pow((distance - waveFront) * 55, 2));
+      pulseThickness += shell * pulse.strength * Math.exp(-pulse.age * 1.3);
+    }
     points[index].thickness = points[index].radius
-      * (1 + Math.sin(time * 1.05 + points[index].u * Math.PI * 4) * 0.035);
+      * (1 + Math.sin(time * 1.05 + points[index].u * Math.PI * 4) * 0.035)
+      + pulseThickness;
     upper.push({
       x: points[index].x + points[index].normalX * points[index].thickness,
       y: points[index].y + points[index].normalY * points[index].thickness,
@@ -466,12 +495,19 @@ function calculateGeometry(time) {
 }
 
 function updateArtwork(time) {
-  const centerPath = pathThrough(points);
+  const centerPath = curveThrough(points);
   const polygonPath = polygonThrough(upper, lower, points);
   glow.setAttribute("d", polygonPath);
   ribbon.setAttribute("d", polygonPath);
-  core.setAttribute("d", centerPath);
-  motionPath.setAttribute("d", centerPath);
+  texture.setAttribute("d", polygonPath);
+
+  const pixelFrame = Math.floor(time * 11);
+  pixelPattern.setAttribute(
+    "patternTransform",
+    `translate(${pixelFrame % 8} ${(pixelFrame * 3) % 8})`,
+  );
+  morseStream.setAttribute("d", centerPath);
+  morseStream.setAttribute("stroke-dashoffset", `${-Math.floor(time * 12) * 0.9}`);
 
   flowLines.forEach((flowLine) => {
     flowLine.points.length = 0;
@@ -481,25 +517,9 @@ function updateArtwork(time) {
         y: point.y + point.normalY * point.thickness * flowLine.offset,
       });
     });
-    flowLine.element.setAttribute("d", pathThrough(flowLine.points));
+    flowLine.element.setAttribute("d", curveThrough(flowLine.points));
   });
 
-  beacons.forEach((beacon, index) => {
-    const travel = (time * (0.024 + index * 0.0024) + index * 0.143) % 1;
-    const position = travel * (points.length - 1);
-    const pointIndex = Math.floor(position);
-    const nextIndex = Math.min(points.length - 1, pointIndex + 1);
-    const mix = position - pointIndex;
-    const point = {
-      x: points[pointIndex].x + (points[nextIndex].x - points[pointIndex].x) * mix,
-      y: points[pointIndex].y + (points[nextIndex].y - points[pointIndex].y) * mix,
-    };
-    const edgeFade = Math.pow(Math.sin(Math.PI * travel), 0.65);
-    beacon.setAttribute("cx", point.x);
-    beacon.setAttribute("cy", point.y);
-    beacon.setAttribute("r", 1.5 + (index % 3) * 0.45);
-    beacon.style.opacity = `${(0.42 + Math.sin(time * 2 + index) * 0.24) * edgeFade}`;
-  });
 }
 
 function animate(timestamp) {
@@ -509,16 +529,10 @@ function animate(timestamp) {
   smoothPointerX += (pointerX - smoothPointerX) * 0.055;
   smoothPointerY += (pointerY - smoothPointerY) * 0.055;
   for (const pulse of pulses) pulse.age += delta;
-  while (pulses.length && pulses[0].age > 2.5) pulses.shift();
+  while (pulses.length && pulses[0].age > 2.2) pulses.shift();
   calculateGeometry(time);
   updateArtwork(time);
   requestAnimationFrame(animate);
-}
-
-for (let index = 0; index < BEACON_COUNT; index += 1) {
-  const beacon = createSvgElement("circle", { class: "beacon" });
-  beaconsGroup.append(beacon);
-  beacons.push(beacon);
 }
 
 FLOW_LINE_OFFSETS.forEach((offset) => {
@@ -531,6 +545,8 @@ FLOW_LINE_OFFSETS.forEach((offset) => {
   flowLinesGroup.append(element);
   flowLines.push({ element, offset, points: [] });
 });
+
+morseStream.setAttribute("stroke-dasharray", buildMorseDashArray(MORSE_MESSAGE));
 
 window.addEventListener("resize", resize);
 window.addEventListener("pointermove", (event) => {
