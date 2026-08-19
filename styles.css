@@ -53,22 +53,14 @@ body {
 
 #signal-glow {
   opacity: 0.38;
-  stroke-width: 34;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 #signal-ribbon {
-  opacity: 0.82;
+  opacity: 0.84;
 }
 
-.strand {
-  fill: none;
-  stroke: url(#signal-gradient);
-  stroke-width: 0.85;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
+#motion-path {
+  pointer-events: none;
 }
 
 .beacon {
@@ -103,7 +95,7 @@ body {
 
 @keyframes pulse-ring {
   from { scale: 0.25; opacity: 0.8; }
-  to { scale: 15; opacity: 0; }
+  to { scale: 8; opacity: 0; }
 }
 
 @keyframes grain {
