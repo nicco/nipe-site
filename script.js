@@ -5,6 +5,7 @@ const texture = document.querySelector("#signal-texture");
 const glow = document.querySelector("#signal-glow");
 const pixelPattern = document.querySelector("#signal-pixels");
 const flowLinesGroup = document.querySelector("#flow-lines");
+const shockDropsGroup = document.querySelector("#shock-drops");
 const morseStream = document.querySelector("#morse-stream");
 const root = document.documentElement;
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -94,6 +95,8 @@ const MORSE_SYMBOL_GAP = 2;
 const MORSE_LETTER_GAP = 3;
 const MORSE_WORD_GAP = 7;
 const MORSE_WIDTH_RATIO = 0.3;
+const SHOCK_DROP_SPEED = 0.22;
+const SHOCK_DROP_LIFETIME = 2.2;
 const MORSE_CODE = {
   a: ".-", b: "-...", c: "-.-.", d: "-..", e: ".", f: "..-.", g: "--.",
   h: "....", i: "..", j: ".---", k: "-.-", l: ".-..", m: "--", n: "-.",
@@ -108,6 +111,7 @@ const upper = [];
 const lower = [];
 const flowLines = [];
 const morseMarks = [];
+const shockDrops = [];
 
 let morseTotalUnits = 1;
 let width = window.innerWidth;
@@ -121,6 +125,7 @@ let previousTimestamp = 0;
 let morseLayoutCache = null;
 let lastSecondaryFrame = -1;
 let lastDebugLogTime = -Infinity;
+let nextAmbientDropTime = 0;
 
 function recordDebugEvent(type, details = {}) {
   const event = { type, time: performance.now(), ...details };
@@ -494,6 +499,36 @@ function roundedPolygonThrough(upperEdge, lowerEdge, centerline) {
   return path;
 }
 
+function createShockDrop(originU, direction, options = {}) {
+  const element = createSvgElement("path", { class: "shock-drop" });
+  shockDropsGroup.append(element);
+  shockDrops.push({
+    age: 0,
+    direction,
+    element,
+    lengthScale: options.lengthScale || 1,
+    lifetime: options.lifetime || SHOCK_DROP_LIFETIME,
+    originU,
+    speed: options.speed || SHOCK_DROP_SPEED,
+  });
+  while (shockDrops.length > 14) {
+    shockDrops.shift().element.remove();
+  }
+}
+
+function createAmbientDrop() {
+  const direction = Math.random() < 0.5 ? -1 : 1;
+  const originU = 0.08 + Math.random() * 0.84;
+  const speed = 0.4 + Math.random() * 0.2;
+  const distanceToEdge = direction < 0 ? originU : 1 - originU;
+  createShockDrop(originU, direction, {
+    lengthScale: 0.75 + Math.random() * 0.65,
+    lifetime: distanceToEdge / speed + 0.2,
+    speed,
+  });
+  recordDebugEvent("ambient-drop", { direction, originU, speed });
+}
+
 function createPulse(x, y) {
   let closestIndex = 0;
   let closestDistance = Infinity;
@@ -510,6 +545,8 @@ function createPulse(x, y) {
     age: 0,
     strength: Math.max(2.5, Math.min(height * 0.005, 5)),
   });
+  createShockDrop(pulses[0].u, -1);
+  createShockDrop(pulses[0].u, 1);
   recordDebugEvent("pulse", { point: closestIndex, x, y });
 
   const ring = document.createElement("i");
@@ -637,6 +674,51 @@ function updateArtwork(time) {
     });
     lastSecondaryFrame = secondaryFrame;
   }
+
+  shockDrops.forEach((drop) => {
+    const travel = drop.originU + drop.direction * drop.age * drop.speed;
+    if (travel <= 0 || travel >= 1) {
+      drop.element.style.opacity = "0";
+      return;
+    }
+    const centerPoint = samplePathAt(travel);
+    const areaScale = referenceThickness / Math.max(1, centerPoint.baseThickness);
+    const bodyLength = referenceMarkWidth * 2.4 * areaScale * drop.lengthScale;
+    const bodyTravel = bodyLength / Math.max(1, pathLength);
+    const shapePoints = [];
+    for (let sample = 0; sample < 7; sample += 1) {
+      const relativePosition = sample / 6 - 0.5;
+      shapePoints.push(samplePathAt(travel + relativePosition * bodyTravel));
+    }
+    const shapeUpper = [];
+    const shapeLower = [];
+    shapePoints.forEach((shapePoint, shapeIndex) => {
+      const previousPoint = shapePoints[Math.max(0, shapeIndex - 1)];
+      const nextPoint = shapePoints[Math.min(shapePoints.length - 1, shapeIndex + 1)];
+      const dx = nextPoint.x - previousPoint.x;
+      const dy = nextPoint.y - previousPoint.y;
+      const segmentLength = Math.hypot(dx, dy) || 1;
+      const normalX = -dy / segmentLength;
+      const normalY = dx / segmentLength;
+      const halfWidth = Math.max(0.5, shapePoint.thickness * MORSE_WIDTH_RATIO);
+      shapeUpper.push({
+        x: shapePoint.x + normalX * halfWidth,
+        y: shapePoint.y + normalY * halfWidth,
+      });
+      shapeLower.push({
+        x: shapePoint.x - normalX * halfWidth,
+        y: shapePoint.y - normalY * halfWidth,
+      });
+    });
+    const fadeIn = Math.min(1, drop.age / 0.08);
+    const fadeOut = Math.min(1, Math.max(0, drop.lifetime - drop.age) / 0.22);
+    const edgeFade = Math.pow(Math.sin(Math.PI * travel), 0.3);
+    drop.element.setAttribute(
+      "d",
+      roundedPolygonThrough(shapeUpper, shapeLower, shapePoints),
+    );
+    drop.element.style.opacity = `${fadeIn * fadeOut * edgeFade}`;
+  });
 
   const measureMarkAt = (mark, travel) => {
     const centerPoint = samplePathAt(Math.max(0, Math.min(1, travel)));
@@ -805,6 +887,7 @@ function updateArtwork(time) {
       pulses: pulses.length,
       pushedMarks,
       renderCount: debugState.renderCount,
+      shockDrops: shockDrops.length,
       time,
       visibleMarks,
     };
@@ -829,6 +912,23 @@ function animate(timestamp) {
   smoothPointerY += (pointerY - smoothPointerY) * 0.055;
   for (const pulse of pulses) pulse.age += delta;
   while (pulses.length && pulses[0].age > 2.2) pulses.shift();
+  shockDrops.forEach((drop) => { drop.age += delta; });
+  for (let index = shockDrops.length - 1; index >= 0; index -= 1) {
+    const drop = shockDrops[index];
+    const travel = drop.originU + drop.direction * drop.age * drop.speed;
+    if (drop.age > drop.lifetime || travel < -0.02 || travel > 1.02) {
+      drop.element.remove();
+      shockDrops.splice(index, 1);
+    }
+  }
+  if (!reducedMotion.matches) {
+    if (!nextAmbientDropTime) {
+      nextAmbientDropTime = time + 0.7 + Math.random() * 1.3;
+    } else if (time >= nextAmbientDropTime) {
+      createAmbientDrop();
+      nextAmbientDropTime = time + 1.2 + Math.random() * 2.4;
+    }
+  }
   calculateGeometry(time);
   updateArtwork(time);
   requestAnimationFrame(animate);

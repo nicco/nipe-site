@@ -79,6 +79,17 @@ body {
   stroke: none;
 }
 
+#morse-stream {
+  display: none;
+}
+
+.shock-drop {
+  pointer-events: none;
+  fill: #ffffff;
+  fill-opacity: 0.35;
+  stroke: none;
+}
+
 .morse-dot {
   fill: #ffffff;
   fill-opacity: 0.35;
