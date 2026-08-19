@@ -109,17 +109,32 @@ function createSvgElement(name, attributes = {}) {
   return element;
 }
 
+function smoothStepRange(value, start, end) {
+  const position = Math.max(0, Math.min(1, (value - start) / (end - start)));
+  return position * position * (3 - 2 * position);
+}
+
 function mapFontPoint([x, y], index) {
-  const naturalWidth = Math.min(width * 0.78, height * 2.72);
-  const wordWidth = naturalWidth * 0.91;
-  const wordHeight = naturalWidth / ROUTE_ASPECT;
+  const compactViewport = width < 720;
+  const naturalWidth = Math.min(
+    width * (compactViewport ? 0.98 : 0.78),
+    height * (compactViewport ? 3.1 : 2.72),
+  );
+  const wordWidth = naturalWidth * (compactViewport ? 0.96 : 0.91);
+  const wordHeight = naturalWidth / ROUTE_ASPECT * (compactViewport ? 1.2 : 1);
   const compression = 0.055;
   const transition = Math.max(0, Math.min(1, (x - 0.46) / 0.2));
   const easedTransition = transition * transition * (3 - 2 * transition);
   const tightenedX = x + compression * 0.5 - compression * easedTransition;
+  const groupedSpacing = (
+    smoothStepRange(x, 0.34, 0.42) * 0.018
+    + smoothStepRange(x, 0.57, 0.69) * 0.025
+    + smoothStepRange(x, 0.74, 0.84) * 0.018
+  );
+  const groupedX = tightenedX + 0.0305 - groupedSpacing;
   const iInward = Math.max(0, 1 - Math.abs(index - 43) / 8) * 0.026;
   return {
-    x: (width - wordWidth) * 0.5 + (tightenedX - iInward) * wordWidth,
+    x: (width - wordWidth) * 0.5 + (groupedX - iInward) * wordWidth,
     y: (height - wordHeight) * 0.5 + y * wordHeight,
     radius: Math.max(0.0075, FONT_RADII[index]) * wordHeight * 1.16,
   };
@@ -210,6 +225,7 @@ function sampleSpline(source, subdivisions = 4) {
 }
 
 function buildGuide() {
+  const compactViewport = width < 720;
   const fontSource = FONT_ROUTE.map(mapFontPoint);
   const first = fontSource[0];
   const second = fontSource[1];
@@ -225,23 +241,29 @@ function buildGuide() {
   const exitTangentY = (last.y - late.y) / exitLength;
   const entryHandle = Math.min(leftSpan * 0.44, height * 0.1);
   const exitHandle = Math.min(rightSpan * 0.46, height * 0.11);
-  const entryStart = { x: -2, y: first.y + Math.min(height * 0.072, 56) };
+  const entryStart = {
+    x: -2,
+    y: first.y + (compactViewport ? Math.min(height * 0.014, 12) : Math.min(height * 0.072, 56)),
+  };
   const entryControlOne = {
     x: leftSpan * 0.34,
-    y: entryStart.y + Math.min(height * 0.034, 26),
+    y: entryStart.y + (compactViewport ? Math.min(height * 0.006, 5) : Math.min(height * 0.034, 26)),
   };
   const entryControlTwo = {
     x: first.x - entryTangentX * entryHandle,
     y: first.y - entryTangentY * entryHandle,
   };
-  const exitEnd = { x: width + 2, y: last.y + Math.min(height * 0.058, 46) };
+  const exitEnd = {
+    x: width + 2,
+    y: last.y + (compactViewport ? Math.min(height * 0.012, 10) : Math.min(height * 0.058, 46)),
+  };
   const exitControlOne = {
     x: last.x + exitTangentX * exitHandle,
     y: last.y + exitTangentY * exitHandle,
   };
   const exitControlTwo = {
     x: width + 2 - rightSpan * 0.3,
-    y: exitEnd.y + Math.min(height * 0.03, 24),
+    y: exitEnd.y + (compactViewport ? Math.min(height * 0.006, 5) : Math.min(height * 0.03, 24)),
   };
   const source = [];
 
