@@ -18,6 +18,15 @@
             <stop offset="76%" stop-color="#f07bbd" />
             <stop offset="100%" stop-color="#ff7058" />
           </linearGradient>
+          <linearGradient id="core-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#f5ffb7" stop-opacity="0" />
+            <stop offset="10%" stop-color="#f5ffb7" stop-opacity="0.55" />
+            <stop offset="27%" stop-color="#c5fff4" />
+            <stop offset="53%" stop-color="#dedcff" />
+            <stop offset="76%" stop-color="#ffd0e8" />
+            <stop offset="90%" stop-color="#ffc4bb" stop-opacity="0.55" />
+            <stop offset="100%" stop-color="#ffc4bb" stop-opacity="0" />
+          </linearGradient>
           <filter id="soft-glow" x="-30%" y="-300%" width="160%" height="700%">
             <feGaussianBlur stdDeviation="18" />
           </filter>
@@ -25,6 +34,8 @@
 
         <path id="signal-glow" fill="url(#signal-gradient)" filter="url(#soft-glow)" />
         <path id="signal-ribbon" fill="url(#signal-gradient)" fill-rule="nonzero" />
+        <g id="flow-lines"></g>
+        <path id="signal-core" fill="none" stroke="url(#core-gradient)" />
         <path id="motion-path" fill="none" stroke="transparent" />
         <g id="beacons"></g>
       </svg>

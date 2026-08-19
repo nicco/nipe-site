@@ -2,7 +2,9 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const svg = document.querySelector("#signal");
 const ribbon = document.querySelector("#signal-ribbon");
 const glow = document.querySelector("#signal-glow");
+const core = document.querySelector("#signal-core");
 const motionPath = document.querySelector("#motion-path");
+const flowLinesGroup = document.querySelector("#flow-lines");
 const beaconsGroup = document.querySelector("#beacons");
 const root = document.documentElement;
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -82,6 +84,7 @@ const FONT_RADII = [
 
 const SAMPLE_COUNT = 280;
 const BEACON_COUNT = 7;
+const FLOW_LINE_OFFSETS = [-0.72, -0.48, -0.24, 0.24, 0.48, 0.72];
 const ROUTE_ASPECT = 3.6965;
 const pulses = [];
 const guidePoints = [];
@@ -89,6 +92,7 @@ const points = [];
 const upper = [];
 const lower = [];
 const beacons = [];
+const flowLines = [];
 
 let width = window.innerWidth;
 let height = window.innerHeight;
@@ -113,8 +117,9 @@ function mapFontPoint([x, y], index) {
   const transition = Math.max(0, Math.min(1, (x - 0.46) / 0.2));
   const easedTransition = transition * transition * (3 - 2 * transition);
   const tightenedX = x + compression * 0.5 - compression * easedTransition;
+  const iInward = Math.max(0, 1 - Math.abs(index - 43) / 8) * 0.026;
   return {
-    x: (width - wordWidth) * 0.5 + tightenedX * wordWidth,
+    x: (width - wordWidth) * 0.5 + (tightenedX - iInward) * wordWidth,
     y: (height - wordHeight) * 0.5 + y * wordHeight,
     radius: Math.max(0.0075, FONT_RADII[index]) * wordHeight * 1.16,
   };
@@ -142,7 +147,7 @@ function cubicValue(start, controlOne, controlTwo, end, t) {
     + t ** 3 * end;
 }
 
-function softenPointChain(source, passes = 2, amount = 0.18) {
+function softenPointChain(source, passes = 3, amount = 0.21) {
   let softened = source.map((point) => ({ ...point }));
   for (let pass = 0; pass < passes; pass += 1) {
     const nextPass = [{ ...softened[0] }];
@@ -278,6 +283,22 @@ function buildGuide() {
       radius: start.radius + (end.radius - start.radius) * mix,
       u: index / (SAMPLE_COUNT - 1),
     });
+  }
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    const coordinates = guidePoints.map((point) => ({ x: point.x, y: point.y }));
+    for (let index = 1; index < guidePoints.length - 1; index += 1) {
+      guidePoints[index].x = (
+        coordinates[index - 1].x
+        + coordinates[index].x * 4
+        + coordinates[index + 1].x
+      ) / 6;
+      guidePoints[index].y = (
+        coordinates[index - 1].y
+        + coordinates[index].y * 4
+        + coordinates[index + 1].y
+      ) / 6;
+    }
   }
 
   for (let pass = 0; pass < 3; pass += 1) {
@@ -427,15 +448,35 @@ function updateArtwork(time) {
   const polygonPath = polygonThrough(upper, lower, points);
   glow.setAttribute("d", polygonPath);
   ribbon.setAttribute("d", polygonPath);
+  core.setAttribute("d", centerPath);
   motionPath.setAttribute("d", centerPath);
+
+  flowLines.forEach((flowLine) => {
+    flowLine.points.length = 0;
+    points.forEach((point) => {
+      flowLine.points.push({
+        x: point.x + point.normalX * point.thickness * flowLine.offset,
+        y: point.y + point.normalY * point.thickness * flowLine.offset,
+      });
+    });
+    flowLine.element.setAttribute("d", pathThrough(flowLine.points));
+  });
 
   beacons.forEach((beacon, index) => {
     const travel = (time * (0.024 + index * 0.0024) + index * 0.143) % 1;
-    const point = points[Math.min(points.length - 1, Math.floor(travel * points.length))];
+    const position = travel * (points.length - 1);
+    const pointIndex = Math.floor(position);
+    const nextIndex = Math.min(points.length - 1, pointIndex + 1);
+    const mix = position - pointIndex;
+    const point = {
+      x: points[pointIndex].x + (points[nextIndex].x - points[pointIndex].x) * mix,
+      y: points[pointIndex].y + (points[nextIndex].y - points[pointIndex].y) * mix,
+    };
+    const edgeFade = Math.pow(Math.sin(Math.PI * travel), 0.65);
     beacon.setAttribute("cx", point.x);
     beacon.setAttribute("cy", point.y);
     beacon.setAttribute("r", 1.5 + (index % 3) * 0.45);
-    beacon.style.opacity = `${0.42 + Math.sin(time * 2 + index) * 0.24}`;
+    beacon.style.opacity = `${(0.42 + Math.sin(time * 2 + index) * 0.24) * edgeFade}`;
   });
 }
 
@@ -457,6 +498,17 @@ for (let index = 0; index < BEACON_COUNT; index += 1) {
   beaconsGroup.append(beacon);
   beacons.push(beacon);
 }
+
+FLOW_LINE_OFFSETS.forEach((offset) => {
+  const element = createSvgElement("path", {
+    class: "flow-line",
+    fill: "none",
+    stroke: "url(#core-gradient)",
+  });
+  element.style.opacity = `${0.32 - Math.abs(offset) * 0.12}`;
+  flowLinesGroup.append(element);
+  flowLines.push({ element, offset, points: [] });
+});
 
 window.addEventListener("resize", resize);
 window.addEventListener("pointermove", (event) => {
