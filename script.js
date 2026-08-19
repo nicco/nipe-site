@@ -196,9 +196,17 @@ function mapFontPoint([x, y], index) {
   const pBowlInfluence = Math.min(pBowlEntry, pBowlExit);
   const pBowlLift = pBowlInfluence * 0.058;
   const pBowlWiden = Math.max(0, x - 0.686) * 0.32 * pBowlInfluence;
+  const eLoopEntry = smoothStepRange(index, 136, 141);
+  const eLoopExit = 1 - smoothStepRange(index, 152, 157);
+  const eLoopInfluence = Math.min(eLoopEntry, eLoopExit);
+  const expandedEX = 0.909 + (x - 0.909) * 1.35;
+  const expandedEY = 0.14 + (y - 0.14) * 1.25;
+  const eX = x + (expandedEX - x) * eLoopInfluence;
+  const eY = y + (expandedEY - y) * eLoopInfluence;
   return {
-    x: (width - wordWidth) * 0.5 + (groupedX + pBowlWiden - iInward) * wordWidth,
-    y: (height - wordHeight) * 0.5 + (y - pBowlLift) * wordHeight,
+    x: (width - wordWidth) * 0.5
+      + (groupedX + (eX - x) + pBowlWiden - iInward) * wordWidth,
+    y: (height - wordHeight) * 0.5 + (eY - pBowlLift) * wordHeight,
     radius: Math.max(0.0075, FONT_RADII[index]) * wordHeight * 1.16,
   };
 }
