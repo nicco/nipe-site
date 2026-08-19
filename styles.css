@@ -73,14 +73,21 @@ body {
   mix-blend-mode: screen;
 }
 
-#morse-stream {
-  opacity: 0.72;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.55;
-  vector-effect: non-scaling-stroke;
+.morse-mark {
   pointer-events: none;
-  mix-blend-mode: screen;
+  mix-blend-mode: normal;
+  stroke: none;
+}
+
+.morse-dot {
+  fill: #ffffff;
+  fill-opacity: 0.3;
+  mix-blend-mode: normal;
+}
+
+.morse-dash {
+  fill: #ffffff;
+  fill-opacity: 0.3;
 }
 
 .grain {

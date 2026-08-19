@@ -11,7 +11,14 @@
     <main class="artwork">
       <svg id="signal" role="img" aria-label="Interactive living signal">
         <defs>
-          <linearGradient id="signal-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+          <linearGradient
+            id="signal-gradient"
+            gradientUnits="userSpaceOnUse"
+            x1="0%"
+            y1="0%"
+            x2="100%"
+            y2="0%"
+          >
             <stop offset="0%" stop-color="#e2ff58" />
             <stop offset="27%" stop-color="#43e1c2" />
             <stop offset="53%" stop-color="#7770ff" />
@@ -44,7 +51,7 @@
         <path id="signal-ribbon" fill="url(#signal-gradient)" fill-rule="nonzero" />
         <path id="signal-texture" fill="url(#signal-pixels)" fill-rule="nonzero" />
         <g id="flow-lines" aria-hidden="true"></g>
-        <path id="morse-stream" fill="none" stroke="url(#core-gradient)" aria-hidden="true" />
+        <g id="morse-stream" aria-hidden="true"></g>
       </svg>
       <div class="grain" aria-hidden="true"></div>
     </main>

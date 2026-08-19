@@ -8,6 +8,9 @@ const flowLinesGroup = document.querySelector("#flow-lines");
 const morseStream = document.querySelector("#morse-stream");
 const root = document.documentElement;
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+const debugEnabled = new URLSearchParams(window.location.search).has("debug");
+const debugState = { events: [], latest: null, samples: [] };
+window.__nipeDebug = debugState;
 
 // Centerline skeleton extracted from the supplied font's combined nipe vector.
 const FONT_ROUTE = [
@@ -82,11 +85,14 @@ const FONT_RADII = [
   0.00872,
 ];
 
-const SAMPLE_COUNT = 280;
+const SAMPLE_COUNT = 200;
+const FRAME_INTERVAL = 1000 / 24;
 const FLOW_LINE_OFFSETS = [-0.72, -0.48, -0.24, 0.24, 0.48, 0.72];
 const ROUTE_ASPECT = 3.6965;
-const MORSE_UNIT = 2.2;
 const MORSE_MESSAGE = "Simplicity is the ultimate sophistication.";
+const MORSE_SYMBOL_GAP = 2;
+const MORSE_LETTER_GAP = 3;
+const MORSE_WORD_GAP = 7;
 const MORSE_CODE = {
   a: ".-", b: "-...", c: "-.-.", d: "-..", e: ".", f: "..-.", g: "--.",
   h: "....", i: "..", j: ".---", k: "-.-", l: ".-..", m: "--", n: "-.",
@@ -100,7 +106,9 @@ const points = [];
 const upper = [];
 const lower = [];
 const flowLines = [];
+const morseMarks = [];
 
+let morseTotalUnits = 1;
 let width = window.innerWidth;
 let height = window.innerHeight;
 let pointerX = width * 0.5;
@@ -109,6 +117,16 @@ let smoothPointerX = pointerX;
 let smoothPointerY = pointerY;
 let pointerActive = false;
 let previousTimestamp = 0;
+let morseLayoutCache = null;
+let lastSecondaryFrame = -1;
+let lastDebugLogTime = -Infinity;
+
+function recordDebugEvent(type, details = {}) {
+  const event = { type, time: performance.now(), ...details };
+  debugState.events.push(event);
+  if (debugState.events.length > 80) debugState.events.shift();
+  if (debugEnabled) console.debug("[nipe:event]", event);
+}
 
 function createSvgElement(name, attributes = {}) {
   const element = document.createElementNS(SVG_NS, name);
@@ -126,21 +144,32 @@ function signalNoise(value) {
   return noise - Math.floor(noise);
 }
 
-function buildMorseDashArray(message) {
+function buildMorseMarks(message) {
   const characters = message.toLowerCase().split("");
-  const pattern = [];
+  const marks = [];
+  let cursor = 0;
   characters.forEach((character, characterIndex) => {
     const code = MORSE_CODE[character];
     if (!code) return;
     code.split("").forEach((symbol, symbolIndex) => {
+      const duration = symbol === "." ? 1 : 3;
+      marks.push({
+        kind: symbol === "." ? "dot" : "dash",
+        center: cursor + duration * 0.5,
+        duration,
+      });
+      cursor += duration;
       const finalSymbol = symbolIndex === code.length - 1;
       const nextCharacter = characters[characterIndex + 1];
       const messageEnd = characterIndex === characters.length - 1;
-      const gap = finalSymbol ? (nextCharacter === " " || messageEnd ? 7 : 3) : 1;
-      pattern.push((symbol === "." ? 1 : 3) * MORSE_UNIT, gap * MORSE_UNIT);
+      const gap = finalSymbol
+        ? (nextCharacter === " " || messageEnd ? MORSE_WORD_GAP : MORSE_LETTER_GAP)
+        : MORSE_SYMBOL_GAP;
+      marks[marks.length - 1].gapAfter = gap;
+      cursor += gap;
     });
   });
-  return pattern.join(" ");
+  return { marks, totalUnits: cursor };
 }
 
 function mapFontPoint([x, y], index) {
@@ -164,9 +193,11 @@ function mapFontPoint([x, y], index) {
   const iInward = Math.max(0, 1 - Math.abs(index - 43) / 8) * 0.026;
   const pBowlEntry = smoothStepRange(index, 95, 101);
   const pBowlExit = 1 - smoothStepRange(index, 127, 135);
-  const pBowlLift = Math.min(pBowlEntry, pBowlExit) * 0.058;
+  const pBowlInfluence = Math.min(pBowlEntry, pBowlExit);
+  const pBowlLift = pBowlInfluence * 0.058;
+  const pBowlWiden = Math.max(0, x - 0.686) * 0.32 * pBowlInfluence;
   return {
-    x: (width - wordWidth) * 0.5 + (groupedX - iInward) * wordWidth,
+    x: (width - wordWidth) * 0.5 + (groupedX + pBowlWiden - iInward) * wordWidth,
     y: (height - wordHeight) * 0.5 + (y - pBowlLift) * wordHeight,
     radius: Math.max(0.0075, FONT_RADII[index]) * wordHeight * 1.16,
   };
@@ -323,8 +354,9 @@ function buildGuide() {
 
   guidePoints.length = 0;
   let sourceIndex = 1;
-  for (let index = 0; index < SAMPLE_COUNT; index += 1) {
-    const target = lengths[lengths.length - 1] * index / (SAMPLE_COUNT - 1);
+  const sampleCount = width < 720 ? 150 : SAMPLE_COUNT;
+  for (let index = 0; index < sampleCount; index += 1) {
+    const target = lengths[lengths.length - 1] * index / (sampleCount - 1);
     while (sourceIndex < lengths.length - 1 && lengths[sourceIndex] < target) sourceIndex += 1;
     const startLength = lengths[sourceIndex - 1];
     const sectionLength = lengths[sourceIndex] - startLength || 1;
@@ -335,7 +367,7 @@ function buildGuide() {
       x: start.x + (end.x - start.x) * mix,
       y: start.y + (end.y - start.y) * mix,
       radius: start.radius + (end.radius - start.radius) * mix,
-      u: index / (SAMPLE_COUNT - 1),
+      u: index / (sampleCount - 1),
     });
   }
 
@@ -372,6 +404,8 @@ function resize() {
   height = window.innerHeight;
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   buildGuide();
+  morseLayoutCache = null;
+  lastSecondaryFrame = -1;
 }
 
 function curveThrough(list, moveTo = true) {
@@ -407,6 +441,50 @@ function polygonThrough(upperEdge, lowerEdge, centerline) {
   return path;
 }
 
+function roundedPolygonThrough(upperEdge, lowerEdge, centerline) {
+  if (!upperEdge.length || !lowerEdge.length || centerline.length < 2) return "";
+  const reversedLower = lowerEdge.slice().reverse();
+  const start = centerline[0];
+  const startNext = centerline[1];
+  const end = centerline[centerline.length - 1];
+  const endPrevious = centerline[centerline.length - 2];
+  const startLength = Math.hypot(startNext.x - start.x, startNext.y - start.y) || 1;
+  const endLength = Math.hypot(end.x - endPrevious.x, end.y - endPrevious.y) || 1;
+  const startTangent = {
+    x: (startNext.x - start.x) / startLength,
+    y: (startNext.y - start.y) / startLength,
+  };
+  const endTangent = {
+    x: (end.x - endPrevious.x) / endLength,
+    y: (end.y - endPrevious.y) / endLength,
+  };
+  const startRadius = Math.hypot(
+    upperEdge[0].x - lowerEdge[0].x,
+    upperEdge[0].y - lowerEdge[0].y,
+  ) * 0.5;
+  const last = upperEdge.length - 1;
+  const endRadius = Math.hypot(
+    upperEdge[last].x - lowerEdge[last].x,
+    upperEdge[last].y - lowerEdge[last].y,
+  ) * 0.5;
+  // A single cubic half-circle keeps both ends fully rounded even as the dash tapers.
+  const capControl = 4 / 3;
+
+  let path = curveThrough(upperEdge);
+  path += ` C ${(upperEdge[last].x + endTangent.x * endRadius * capControl).toFixed(2)}`;
+  path += ` ${(upperEdge[last].y + endTangent.y * endRadius * capControl).toFixed(2)},`;
+  path += ` ${(lowerEdge[last].x + endTangent.x * endRadius * capControl).toFixed(2)}`;
+  path += ` ${(lowerEdge[last].y + endTangent.y * endRadius * capControl).toFixed(2)},`;
+  path += ` ${lowerEdge[last].x.toFixed(2)} ${lowerEdge[last].y.toFixed(2)}`;
+  path += curveThrough(reversedLower, false);
+  path += ` C ${(lowerEdge[0].x - startTangent.x * startRadius * capControl).toFixed(2)}`;
+  path += ` ${(lowerEdge[0].y - startTangent.y * startRadius * capControl).toFixed(2)},`;
+  path += ` ${(upperEdge[0].x - startTangent.x * startRadius * capControl).toFixed(2)}`;
+  path += ` ${(upperEdge[0].y - startTangent.y * startRadius * capControl).toFixed(2)},`;
+  path += ` ${upperEdge[0].x.toFixed(2)} ${upperEdge[0].y.toFixed(2)} Z`;
+  return path;
+}
+
 function createPulse(x, y) {
   let closestIndex = 0;
   let closestDistance = Infinity;
@@ -417,11 +495,13 @@ function createPulse(x, y) {
       closestIndex = index;
     }
   });
+  pulses.length = 0;
   pulses.push({
     u: closestIndex / Math.max(1, points.length - 1),
     age: 0,
     strength: Math.max(2.5, Math.min(height * 0.005, 5)),
   });
+  recordDebugEvent("pulse", { point: closestIndex, x, y });
 
   const ring = document.createElement("i");
   ring.className = "pulse-ring";
@@ -480,9 +560,9 @@ function calculateGeometry(time) {
       const shell = Math.exp(-Math.pow((distance - waveFront) * 55, 2));
       pulseThickness += shell * pulse.strength * Math.exp(-pulse.age * 1.3);
     }
-    points[index].thickness = points[index].radius
-      * (1 + Math.sin(time * 1.05 + points[index].u * Math.PI * 4) * 0.035)
-      + pulseThickness;
+    points[index].baseThickness = points[index].radius
+      * (1 + Math.sin(time * 1.05 + points[index].u * Math.PI * 4) * 0.035);
+    points[index].thickness = points[index].baseThickness + pulseThickness;
     upper.push({
       x: points[index].x + points[index].normalX * points[index].thickness,
       y: points[index].y + points[index].normalY * points[index].thickness,
@@ -495,9 +575,38 @@ function calculateGeometry(time) {
 }
 
 function updateArtwork(time) {
-  const centerPath = curveThrough(points);
   const polygonPath = polygonThrough(upper, lower, points);
-  glow.setAttribute("d", polygonPath);
+  const referenceThickness = guidePoints.reduce(
+    (maximum, point) => Math.max(maximum, point.radius),
+    1,
+  );
+  const referenceMarkWidth = referenceThickness * 2 * 0.5;
+  let pathLength = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    pathLength += Math.hypot(
+      points[index].x - points[index - 1].x,
+      points[index].y - points[index - 1].y,
+    );
+  }
+  const samplePathAt = (sampleTravel) => {
+    const samplePosition = sampleTravel * (points.length - 1);
+    const sampleIndex = Math.max(0, Math.min(points.length - 1, Math.floor(samplePosition)));
+    const sampleNextIndex = Math.min(points.length - 1, sampleIndex + 1);
+    const sampleMix = samplePosition - sampleIndex;
+    return {
+      x: points[sampleIndex].x
+        + (points[sampleNextIndex].x - points[sampleIndex].x) * sampleMix,
+      y: points[sampleIndex].y
+        + (points[sampleNextIndex].y - points[sampleIndex].y) * sampleMix,
+      thickness: points[sampleIndex].thickness
+        + (points[sampleNextIndex].thickness - points[sampleIndex].thickness) * sampleMix,
+      baseThickness: points[sampleIndex].baseThickness
+        + (points[sampleNextIndex].baseThickness - points[sampleIndex].baseThickness) * sampleMix,
+    };
+  };
+  const secondaryFrame = Math.floor(time * 12);
+  const refreshSecondaryLayers = secondaryFrame !== lastSecondaryFrame;
+  if (refreshSecondaryLayers) glow.setAttribute("d", polygonPath);
   ribbon.setAttribute("d", polygonPath);
   texture.setAttribute("d", polygonPath);
 
@@ -506,23 +615,201 @@ function updateArtwork(time) {
     "patternTransform",
     `translate(${pixelFrame % 8} ${(pixelFrame * 3) % 8})`,
   );
-  morseStream.setAttribute("d", centerPath);
-  morseStream.setAttribute("stroke-dashoffset", `${-Math.floor(time * 12) * 0.9}`);
-
-  flowLines.forEach((flowLine) => {
-    flowLine.points.length = 0;
-    points.forEach((point) => {
-      flowLine.points.push({
-        x: point.x + point.normalX * point.thickness * flowLine.offset,
-        y: point.y + point.normalY * point.thickness * flowLine.offset,
+  if (refreshSecondaryLayers) {
+    flowLines.forEach((flowLine) => {
+      flowLine.points.length = 0;
+      points.forEach((point) => {
+        flowLine.points.push({
+          x: point.x + point.normalX * point.thickness * flowLine.offset,
+          y: point.y + point.normalY * point.thickness * flowLine.offset,
+        });
       });
+      flowLine.element.setAttribute("d", curveThrough(flowLine.points));
     });
-    flowLine.element.setAttribute("d", curveThrough(flowLine.points));
+    lastSecondaryFrame = secondaryFrame;
+  }
+
+  const measureMarkAt = (mark, travel) => {
+    const centerPoint = samplePathAt(Math.max(0, Math.min(1, travel)));
+    const markHeight = Math.max(1, centerPoint.baseThickness * 2 * 0.5);
+    const areaScale = referenceThickness / Math.max(1, centerPoint.baseThickness);
+    let bodyLength;
+    if (mark.kind === "dot") {
+      const targetArea = Math.PI * (referenceMarkWidth * 0.5) ** 2;
+      const capArea = Math.PI * (markHeight * 0.5) ** 2;
+      bodyLength = Math.max(0.35, (targetArea - capArea) / markHeight);
+    } else {
+      bodyLength = mark.duration * 0.72 / morseTotalUnits * pathLength * areaScale;
+    }
+    return {
+      bodyLength,
+      halfExtentPixels: (bodyLength + markHeight) * 0.5,
+      markHeight,
+    };
+  };
+
+  if (!morseLayoutCache) {
+    const gapUnit = Math.max(9, referenceMarkWidth * 0.38);
+    let cycleCursor = 0;
+    morseMarks.forEach((mark) => {
+      const referenceBodyLength = mark.kind === "dot"
+        ? 0.35
+        : mark.duration * 0.72 / morseTotalUnits * pathLength;
+      const referenceLength = referenceBodyLength + referenceMarkWidth;
+      mark.cycleCenter = cycleCursor + referenceLength * 0.5;
+      cycleCursor += referenceLength + mark.gapAfter * gapUnit;
+    });
+    morseLayoutCache = {
+      cycleLength: Math.max(cycleCursor, pathLength + referenceMarkWidth * 4),
+      flowSpeed: 4.5 / morseTotalUnits * pathLength,
+      minimumGap: Math.max(10, referenceMarkWidth * 0.4),
+      visibleBuffer: referenceMarkWidth * 3,
+    };
+  }
+  const {
+    cycleLength,
+    flowSpeed,
+    minimumGap,
+    visibleBuffer,
+  } = morseLayoutCache;
+  const flowOffset = reducedMotion.matches ? 0 : time * flowSpeed;
+  const layout = [];
+  morseMarks.forEach((mark) => {
+    const baseDistance = (mark.cycleCenter + flowOffset) % cycleLength;
+    if (baseDistance > pathLength + visibleBuffer) {
+      mark.element.style.opacity = "0";
+      mark.layoutDistance = undefined;
+      mark.previousBaseDistance = undefined;
+      mark.debugDistance = undefined;
+      return;
+    }
+    layout.push({ mark, baseDistance });
+  });
+  layout.sort((first, second) => first.baseDistance - second.baseDistance);
+
+  let previousEnd = -minimumGap;
+  let backwardMoves = 0;
+  let pushedMarks = 0;
+  layout.forEach((item) => {
+    let targetDistance = item.baseDistance;
+    let measurement = measureMarkAt(item.mark, targetDistance / Math.max(1, pathLength));
+    for (let pass = 0; pass < 2; pass += 1) {
+      targetDistance = Math.max(
+        item.baseDistance,
+        previousEnd + minimumGap + measurement.halfExtentPixels,
+      );
+      measurement = measureMarkAt(item.mark, targetDistance / Math.max(1, pathLength));
+    }
+
+    const previousDistance = item.mark.layoutDistance;
+    const previousBaseDistance = item.mark.previousBaseDistance;
+    const baseDelta = previousBaseDistance === undefined
+      ? 0
+      : item.baseDistance - previousBaseDistance;
+    const wrapped = baseDelta < -cycleLength * 0.5;
+    const advectedDistance = previousDistance === undefined || wrapped
+      ? targetDistance
+      : previousDistance + Math.max(0, baseDelta);
+    let distance = Math.max(advectedDistance, targetDistance, item.baseDistance);
+    for (let pass = 0; pass < 2; pass += 1) {
+      measurement = measureMarkAt(item.mark, distance / Math.max(1, pathLength));
+      distance = Math.max(
+        distance,
+        item.baseDistance,
+        previousEnd + minimumGap + measurement.halfExtentPixels,
+      );
+    }
+    measurement = measureMarkAt(item.mark, distance / Math.max(1, pathLength));
+    if (item.mark.debugDistance !== undefined && distance < item.mark.debugDistance - 0.1) {
+      backwardMoves += 1;
+    }
+    if (distance > item.baseDistance + 0.5) pushedMarks += 1;
+    item.mark.layoutDistance = distance;
+    item.mark.previousBaseDistance = item.baseDistance;
+    item.mark.debugDistance = distance;
+    item.distance = distance;
+    item.measurement = measurement;
+    previousEnd = distance + measurement.halfExtentPixels;
   });
 
+  let visibleMarks = 0;
+  layout.forEach(({ mark, distance, measurement }) => {
+    if (
+      distance <= measurement.halfExtentPixels
+      || distance >= pathLength - measurement.halfExtentPixels
+    ) {
+      mark.element.style.opacity = "0";
+      return;
+    }
+    visibleMarks += 1;
+    const travel = distance / Math.max(1, pathLength);
+    const bodyTravel = measurement.bodyLength / Math.max(1, pathLength);
+    const shapePoints = [];
+    const sampleCount = mark.kind === "dot" ? 9 : 7;
+    for (let sample = 0; sample < sampleCount; sample += 1) {
+      const relativePosition = sample / (sampleCount - 1) - 0.5;
+      shapePoints.push(samplePathAt(travel + relativePosition * bodyTravel));
+    }
+    const shapeUpper = [];
+    const shapeLower = [];
+    shapePoints.forEach((shapePoint, shapeIndex) => {
+      const previousPoint = shapePoints[Math.max(0, shapeIndex - 1)];
+      const nextPoint = shapePoints[Math.min(shapePoints.length - 1, shapeIndex + 1)];
+      const dx = nextPoint.x - previousPoint.x;
+      const dy = nextPoint.y - previousPoint.y;
+      const segmentLength = Math.hypot(dx, dy) || 1;
+      const normalX = -dy / segmentLength;
+      const normalY = dx / segmentLength;
+      const halfWidth = Math.max(0.5, shapePoint.thickness * 0.5);
+      shapeUpper.push({
+        x: shapePoint.x + normalX * halfWidth,
+        y: shapePoint.y + normalY * halfWidth,
+      });
+      shapeLower.push({
+        x: shapePoint.x - normalX * halfWidth,
+        y: shapePoint.y - normalY * halfWidth,
+      });
+    });
+    mark.element.setAttribute(
+      "d",
+      roundedPolygonThrough(shapeUpper, shapeLower, shapePoints),
+    );
+    mark.element.style.opacity = `${Math.pow(Math.sin(Math.PI * travel), 0.58)}`;
+  });
+
+  debugState.renderCount = (debugState.renderCount || 0) + 1;
+  if (debugEnabled && time - lastDebugLogTime >= 1) {
+    const previousSample = debugState.latest;
+    const elapsed = previousSample ? time - previousSample.time : 0;
+    const renderedFrames = previousSample
+      ? debugState.renderCount - previousSample.renderCount
+      : 0;
+    const sample = {
+      backwardMoves,
+      cycleLength: Math.round(cycleLength),
+      flowPhase: Math.round(flowOffset % cycleLength),
+      fps: elapsed > 0 ? Number((renderedFrames / elapsed).toFixed(1)) : 0,
+      layoutMarks: layout.length,
+      pulses: pulses.length,
+      pushedMarks,
+      renderCount: debugState.renderCount,
+      time,
+      visibleMarks,
+    };
+    debugState.latest = sample;
+    debugState.samples.push(sample);
+    if (debugState.samples.length > 120) debugState.samples.shift();
+    lastDebugLogTime = time;
+    console.debug("[nipe:flow]", sample);
+  }
 }
 
 function animate(timestamp) {
+  const frameInterval = width < 720 ? 1000 / 20 : FRAME_INTERVAL;
+  if (previousTimestamp && timestamp - previousTimestamp < frameInterval - 1) {
+    requestAnimationFrame(animate);
+    return;
+  }
   const time = reducedMotion.matches ? 3 : timestamp / 1000;
   const delta = previousTimestamp ? Math.min(0.05, (timestamp - previousTimestamp) / 1000) : 0.016;
   previousTimestamp = timestamp;
@@ -546,7 +833,15 @@ FLOW_LINE_OFFSETS.forEach((offset) => {
   flowLines.push({ element, offset, points: [] });
 });
 
-morseStream.setAttribute("stroke-dasharray", buildMorseDashArray(MORSE_MESSAGE));
+const morsePattern = buildMorseMarks(MORSE_MESSAGE);
+morseTotalUnits = morsePattern.totalUnits;
+morsePattern.marks.forEach((mark) => {
+  const element = createSvgElement("path", {
+    class: `morse-mark morse-${mark.kind}`,
+  });
+  morseStream.append(element);
+  morseMarks.push({ ...mark, element });
+});
 
 window.addEventListener("resize", resize);
 window.addEventListener("pointermove", (event) => {
