@@ -93,6 +93,7 @@ const MORSE_MESSAGE = "Simplicity is the ultimate sophistication.";
 const MORSE_SYMBOL_GAP = 2;
 const MORSE_LETTER_GAP = 3;
 const MORSE_WORD_GAP = 7;
+const MORSE_WIDTH_RATIO = 0.3;
 const MORSE_CODE = {
   a: ".-", b: "-...", c: "-.-.", d: "-..", e: ".", f: "..-.", g: "--.",
   h: "....", i: "..", j: ".---", k: "-.-", l: ".-..", m: "--", n: "-.",
@@ -588,7 +589,7 @@ function updateArtwork(time) {
     (maximum, point) => Math.max(maximum, point.radius),
     1,
   );
-  const referenceMarkWidth = referenceThickness * 2 * 0.5;
+  const referenceMarkWidth = referenceThickness * 2 * MORSE_WIDTH_RATIO;
   let pathLength = 0;
   for (let index = 1; index < points.length; index += 1) {
     pathLength += Math.hypot(
@@ -639,7 +640,10 @@ function updateArtwork(time) {
 
   const measureMarkAt = (mark, travel) => {
     const centerPoint = samplePathAt(Math.max(0, Math.min(1, travel)));
-    const markHeight = Math.max(1, centerPoint.baseThickness * 2 * 0.5);
+    const markHeight = Math.max(
+      1,
+      centerPoint.baseThickness * 2 * MORSE_WIDTH_RATIO,
+    );
     const areaScale = referenceThickness / Math.max(1, centerPoint.baseThickness);
     let bodyLength;
     if (mark.kind === "dot") {
@@ -768,7 +772,7 @@ function updateArtwork(time) {
       const segmentLength = Math.hypot(dx, dy) || 1;
       const normalX = -dy / segmentLength;
       const normalY = dx / segmentLength;
-      const halfWidth = Math.max(0.5, shapePoint.thickness * 0.5);
+      const halfWidth = Math.max(0.5, shapePoint.thickness * MORSE_WIDTH_RATIO);
       shapeUpper.push({
         x: shapePoint.x + normalX * halfWidth,
         y: shapePoint.y + normalY * halfWidth,
